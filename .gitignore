@@ -1,19 +1,15 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
-
+ 
 # Virtual environment
 venv/
 env/
-
+ 
 # Environment variables
 .env
+ 
 
-# VS Code settings (optional)
-.vscode/
-
+ 
 # MacOS metadata
 .DS_Store
-
-# Render deployment config (optional)
-render.yaml
