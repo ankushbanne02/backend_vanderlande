@@ -12,12 +12,14 @@ def get_volume_records(db: Database = Depends(get_db)):
         "volume_data.length": {"$exists": True},
         "volume_data.width": {"$exists": True},
         "volume_data.height": {"$exists": True}
-    }, {
+    }, 
+    {
         "_id": 0,
         "volume_data.length": 1,
         "volume_data.width": 1,
         "volume_data.height": 1
-    })
+    }
+    )
 
     result = []
     for doc in cursor:
