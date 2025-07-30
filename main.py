@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import summary  # Import your router module
+from app.routes import summary,volume  # Import your router module
 
 app = FastAPI(
     title="Parcel KPI API",
@@ -25,3 +25,4 @@ def root():
 
 # Register KPI summary route
 app.include_router(summary.router)
+app.include_router(volume.router)
