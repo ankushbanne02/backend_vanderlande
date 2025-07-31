@@ -12,6 +12,15 @@ def get_throughput(payload: DateRequest, db: Database = Depends(get_db)):
     try:
         print(f"Fetching data from collection: {payload.date}")
 
+        # Validate bin_size
+        valid_bins = [10, 15, 30, 45, 60]
+        bin_size = payload.bin_size
+        if bin_size not in valid_bins:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid bin size. Choose from {valid_bins}"
+            )
+
         if payload.date not in db.list_collection_names():
             raise HTTPException(status_code=404, detail=f"No collection found for date {payload.date}")
 
@@ -23,8 +32,10 @@ def get_throughput(payload: DateRequest, db: Database = Depends(get_db)):
         
         time_bins = OrderedDict()
         start_time = datetime.strptime("00:00", "%H:%M")
-        for i in range(144):
-            label = (start_time + timedelta(minutes=10 * i)).strftime("%H:%M")
+        num_bins = int(24 * 60 / bin_size)
+        
+        for i in range(num_bins):
+            label = (start_time + timedelta(minutes=i * bin_size)).strftime("%H:%M")
             time_bins[label] = 0
 
         parcels_in_time = time_bins.copy()
@@ -43,7 +54,9 @@ def get_throughput(payload: DateRequest, db: Database = Depends(get_db)):
                 except:
                     dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S.%fZ")  # fallback
 
-                bin_time = dt.replace(minute=(dt.minute // 10) * 10, second=0, microsecond=0)
+                # Floor to nearest bin
+                floored_minutes = (dt.minute // bin_size) * bin_size
+                bin_time = dt.replace(minute=floored_minutes, second=0, microsecond=0)
                 bin_label = bin_time.strftime("%H:%M")
 
                 if bin_label in parcels_in_time:
@@ -58,6 +71,7 @@ def get_throughput(payload: DateRequest, db: Database = Depends(get_db)):
         avg_out = round(total_out / len(parcels_out_time), 2) if parcels_out_time else 0
 
         return {
+            "bin_size_minutes": bin_size,
             "total_in": total_in,
             "total_out": total_out,
             "avg_in": avg_in,
