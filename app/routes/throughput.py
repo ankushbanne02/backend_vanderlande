@@ -82,10 +82,15 @@ def get_throughput(payload: DateRequest, db: Database = Depends(get_db)):
 
                     if start_time <= ts <= end_time:
                         total_in += 1
-                        bin_label = ts.strftime("%H:%M")
+                        # Floor the timestamp to the nearest bin
+                        minutes_since_start = int((ts - start_time).total_seconds() // 60)
+                        floored_minutes = (minutes_since_start // bin_size) * bin_size
+                        bin_time = start_time + timedelta(minutes=floored_minutes)
+                        bin_label = bin_time.strftime("%H:%M")
+
                         if bin_label in parcels_in_time:
                             parcels_in_time[bin_label] += 1
-                        break
+
 
             # OUT event
             for event in events:
@@ -103,12 +108,18 @@ def get_throughput(payload: DateRequest, db: Database = Depends(get_db)):
                         raw_parts = raw.split("|")
                         if len(raw_parts) > 10:
                             sort_status = raw_parts[10]
+                            # Compute floored bin label
+                            minutes_since_start = int((ts - start_time).total_seconds() // 60)
+                            floored_minutes = (minutes_since_start // bin_size) * bin_size
+                            bin_time = start_time + timedelta(minutes=floored_minutes)
+                            bin_label = bin_time.strftime("%H:%M")
+
                             if sort_status == "1":
                                 total_out += 1
-                                bin_label = ts.strftime("%H:%M")
                                 if bin_label in parcels_out_time:
                                     parcels_out_time[bin_label] += 1
                                 break
+
                             elif sort_status == "999":
                                 for ev in events:
                                     if ev.get("msg_id") == "7":
@@ -116,48 +127,65 @@ def get_throughput(payload: DateRequest, db: Database = Depends(get_db)):
                                         parts = raw_dereg.split("|")
                                         if len(parts) > 9 and parts[9] == "2":
                                             total_out += 1
-                                            bin_label = ts.strftime("%H:%M")
                                             if bin_label in parcels_out_time:
                                                 parcels_out_time[bin_label] += 1
                                             break
                                 break
 
+            def safe_parse_time(ts_str, start_time):
+                formats = ["%H:%M:%S,%f", "%H:%M:%S"]  # support both with and without milliseconds
+                for fmt in formats:
+                    try:
+                        ts = datetime.strptime(ts_str.strip(), fmt).replace(
+                            year=start_time.year, month=start_time.month, day=start_time.day
+                        )
+                        return ts
+                    except ValueError:
+                        continue
+                return None
+
             # Overflow Case 1
             for event in events:
                 if event.get("msg_id") == "6":
                     ts_str = event.get("ts")
-                    try:
-                        ts = datetime.strptime(ts_str, "%H:%M:%S,%f").replace(
-                            year=start_time.year, month=start_time.month, day=start_time.day
-                        )
-                    except:
+                    ts = safe_parse_time(ts_str, start_time)
+                    if not ts or not (start_time <= ts <= end_time):
                         continue
+                    # try:
+                    #     ts = datetime.strptime(ts_str, "%H:%M:%S,%f").replace(
+                    #         year=start_time.year, month=start_time.month, day=start_time.day
+                    #     )
+                    # except:
+                    #     continue
 
-                    if start_time <= ts <= end_time:
-                        raw = event.get("raw", "")
-                        parts = raw.split("|")
-                        if len(parts) > 10 and parts[10] == "999":
-                            for ev in events:
-                                if ev.get("msg_id") == "2":
-                                    overflow_count += 1
-                                    break
+                    # if start_time <= ts <= end_time:
+                    raw = event.get("raw", "")
+                    parts = raw.split("|")
+                    if len(parts) > 10 and parts[10] == "999":
+                        for ev in event:
+                            if ev.get("msg_id") == "2":
+                                overflow_count += 1
+                                break
 
             # Overflow Case 2
             for event in events:
                 if event.get("msg_id") == "7":
                     ts_str = event.get("ts")
-                    try:
-                        ts = datetime.strptime(ts_str, "%H:%M:%S,%f").replace(
-                            year=start_time.year, month=start_time.month, day=start_time.day
-                        )
-                    except:
+                    ts = safe_parse_time(ts_str, start_time)
+                    if not ts or not (start_time <= ts <= end_time):
                         continue
+                    # try:
+                    #     ts = datetime.strptime(ts_str, "%H:%M:%S,%f").replace(
+                    #         year=start_time.year, month=start_time.month, day=start_time.day
+                    #     )
+                    # except:
+                    #     continue
 
-                    if start_time <= ts <= end_time:
-                        raw = event.get("raw", "")
-                        parts = raw.split("|")
-                        if len(parts) > 11 and parts[11] in overflow_locations:
-                            overflow_count += 1
+                    # if start_time <= ts <= end_time:
+                    raw = event.get("raw", "")
+                    parts = raw.split("|")
+                    if len(parts) > 11 and parts[11] in overflow_locations:
+                        overflow_count += 1
           
         # for parcel in parcels:
         #     events = parcel.get("events", [])
