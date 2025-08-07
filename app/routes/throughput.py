@@ -37,15 +37,6 @@ def get_throughput(payload: DateRequest, db: Database = Depends(get_db)):
             raise HTTPException(status_code=400, detail="Time format must be HH:MM")
         if end_time <= start_time:
             raise HTTPException(status_code=400, detail="End time must be after start time")
-        
-        
-        # time_bins = OrderedDict()
-        # start_time = datetime.strptime("00:00", "%H:%M")
-        # num_bins = int(24 * 60 / bin_size)
-        
-        # for i in range(num_bins):
-        #     label = (start_time + timedelta(minutes=i * bin_size)).strftime("%H:%M")
-        #     time_bins[label] = 0
 
         # Configurable locations for overflow detection
         overflow_locations = ["1001.0045.0040.B31", "1001.0043.0000.B71"]
@@ -151,14 +142,7 @@ def get_throughput(payload: DateRequest, db: Database = Depends(get_db)):
                     ts = safe_parse_time(ts_str, start_time)
                     if not ts or not (start_time <= ts <= end_time):
                         continue
-                    # try:
-                    #     ts = datetime.strptime(ts_str, "%H:%M:%S,%f").replace(
-                    #         year=start_time.year, month=start_time.month, day=start_time.day
-                    #     )
-                    # except:
-                    #     continue
 
-                    # if start_time <= ts <= end_time:
                     raw = event.get("raw", "")
                     parts = raw.split("|")
                     if len(parts) > 10 and parts[10] == "999":
@@ -174,115 +158,11 @@ def get_throughput(payload: DateRequest, db: Database = Depends(get_db)):
                     ts = safe_parse_time(ts_str, start_time)
                     if not ts or not (start_time <= ts <= end_time):
                         continue
-                    # try:
-                    #     ts = datetime.strptime(ts_str, "%H:%M:%S,%f").replace(
-                    #         year=start_time.year, month=start_time.month, day=start_time.day
-                    #     )
-                    # except:
-                    #     continue
 
-                    # if start_time <= ts <= end_time:
                     raw = event.get("raw", "")
                     parts = raw.split("|")
                     if len(parts) > 11 and parts[11] in overflow_locations:
                         overflow_count += 1
-          
-        # for parcel in parcels:
-        #     events = parcel.get("events", [])
-
-        #     # === IN Logic ===
-        #     in_found = False
-        #     for event in events:
-        #         if event.get("type") == "itempropertiesupdate":
-        #             ts = event.get("ts")
-        #             if ts:
-        #                 try:
-        #                     dt = datetime.fromisoformat(ts)
-        #                 except:
-        #                     try:
-        #                         dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S.%fZ")
-        #                     except:
-        #                         continue
-
-        #                 dt_time = dt.replace(year=1900, month=1, day=1)
-        #                 if start_time <= dt_time < end_time:
-        #                     floored_minutes = (dt.minute // payload.bin_size) * payload.bin_size
-        #                     bin_time = dt.replace(minute=floored_minutes, second=0, microsecond=0)
-        #                     bin_label = bin_time.strftime("%H:%M")
-
-        #                     if bin_label in parcels_in_time:
-        #                         parcels_in_time[bin_label] += 1
-        #                         total_in += 1
-        #                         in_found = True
-        #                     break  # Use first matching event only
-
-        #     # === OUT Logic ===
-        #     out_found = False
-        #     for event in events:
-        #         if event.get("type") == "verifiedsortreport":
-        #             sort_status = event.get("sort_status")
-        #             ts = event.get("ts")
-
-        #             if ts:
-        #                 try:
-        #                     dt = datetime.fromisoformat(ts)
-        #                 except:
-        #                     try:
-        #                         dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S.%fZ")
-        #                     except:
-        #                         continue
-
-        #                 dt_time = dt.replace(year=1900, month=1, day=1)
-        #                 if start_time <= dt_time < end_time:
-        #                     floored_minutes = (dt.minute // payload.bin_size) * payload.bin_size
-        #                     bin_time = dt.replace(minute=floored_minutes, second=0, microsecond=0)
-        #                     bin_label = bin_time.strftime("%H:%M")
-
-        #                     if sort_status == 1:
-        #                         if bin_label in parcels_out_time:
-        #                             parcels_out_time[bin_label] += 1
-        #                             total_out += 1
-        #                             out_found = True
-        #                         break
-
-        #                     elif sort_status == 999:
-        #                         # Look for itemderegister event with raw=2
-        #                         for ev in events:
-        #                             if ev.get("type") == "itemderegister" and ev.get("raw") == 2:
-        #                                 if bin_label in parcels_out_time:
-        #                                     parcels_out_time[bin_label] += 1
-        #                                     total_out += 1
-        #                                     out_found = True
-        #                                 break
-        #             if out_found:
-        #                 break
-
-        #     if not in_found and not out_found:
-        #         overflow += 1
-
-            # ts = parcel.get("events", [{}])[0].get("ts")
-            # exit_state = parcel.get("exit_state")
-
-            # if ts:
-            #     try:
-            #         dt = datetime.fromisoformat(ts)
-            #     except:
-            #         dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S.%fZ")  # fallback
-
-            #     # Floor to nearest bin
-            #     floored_minutes = (dt.minute // bin_size) * bin_size
-            #     bin_time = dt.replace(minute=floored_minutes, second=0, microsecond=0)
-            #     bin_label = bin_time.strftime("%H:%M")
-
-            #     if bin_label in parcels_in_time:
-            #         if exit_state is None:
-            #             total_in += 1
-            #             parcels_in_time[bin_label] += 1
-            #         else:
-            #             total_out += 1
-            #             parcels_out_time[bin_label] += 1
-
-
 
         avg_in = round(total_in / len(parcels_in_time), 2) if parcels_in_time else 0
         avg_out = round(total_out / len(parcels_out_time), 2) if parcels_out_time else 0

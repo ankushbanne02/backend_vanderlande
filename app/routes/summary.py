@@ -23,17 +23,53 @@ def get_summary(payload: DateRequest, db: Database = Depends(get_db)):
         total = len(parcels)
 
         # 1. Sorted Good
-        sorted_good = sum(
+        sorted_parcels = sum(
             1 for p in parcels
-            if p.get("lifeCycle", {}).get("status") == "sorted"
-            and str(p.get("destination_status", "")).endswith(";1")
+            if p.get("status") == "sorted" and p.get("sort_strategy") == "1"
         )
 
-        # 2. Overflow (status == "open")
-        overflow = sum(1 for p in parcels if p.get("lifeCycle", {}).get("status") == "open")
+        # Configurable locations for overflow detection
+        overflow_locations = ["1001.0045.0040.B31", "1001.0043.0000.B71"]
+
+        # Helper function to calculate overflow
+        def calculate_overflow(parcels, overflow_locations):
+            overflow_count = 0
+
+            for parcel in parcels:
+                events = parcel.get("events", [])
+
+                # --- Overflow Case 1 ---
+                has_verified_sort_999 = any(
+                    e.get("msg_id") == "6" and
+                    len(e.get("raw", "").split("|")) > 10 and
+                    e.get("raw", "").split("|")[10] == "999"
+                    for e in events
+                )
+
+                if has_verified_sort_999:
+                    has_msg_id_2 = any(ev.get("msg_id") == "2" for ev in events)
+                    if has_msg_id_2:
+                        overflow_count += 1
+                        continue  # avoid double-counting if it also matches Case 2
+
+                # --- Overflow Case 2 ---
+                has_msg_id_7_in_overflow_location = any(
+                    e.get("msg_id") == "7" and
+                    len(e.get("raw", "").split("|")) > 11 and
+                    e.get("raw", "").split("|")[11] in overflow_locations
+                    for e in events
+                )
+
+                if has_msg_id_7_in_overflow_location:
+                    overflow_count += 1
+
+            return overflow_count
+
+        # 2. Overflow
+        overflow = calculate_overflow(parcels, overflow_locations)
 
         # 3. Barcode Read Ratio
-        barcode_read = sum(1 for p in parcels if p.get("barcodeErr") is False)
+        barcode_read = sum(1 for p in parcels if p.get("barcode_error") is False)
         barcode_read_ratio = round((barcode_read / total) * 100, 2) if total else 0.0
 
         # 4. Volume Rate (only if real_volume is a valid positive number)
@@ -44,29 +80,40 @@ def get_summary(payload: DateRequest, db: Database = Depends(get_db)):
         )
         volume_rate = round((volume_valid / total) * 100, 2) if total else 0.0
 
-        # 5. Throughput (average parcels per hour)
-        timestamps = [
-            datetime.fromisoformat(p["lifeCycle"]["registeredAt"])
-            for p in parcels
-            if "lifeCycle" in p and "registeredAt" in p["lifeCycle"]
-        ]
+        # 5. Throughput (average parcels per hour using msg_id == "2")
+        in_timestamps = []
+
+        for p in parcels:
+            for event in p.get("events", []):
+                if event.get("msg_id") == "2":
+                    ts_str = event.get("ts")
+                    try:
+                        ts = datetime.strptime(ts_str, "%H:%M:%S,%f")
+                        in_timestamps.append(ts)
+                        break  # only first msg_id == 2 per parcel
+                    except:
+                        continue
+
         throughput_per_hour = 0.0
-        if timestamps:
-            duration = (max(timestamps) - min(timestamps)).total_seconds() / 3600
-            throughput_per_hour = round(total / duration, 2) if duration > 0 else 0.0
+        if in_timestamps:
+            start_time = min(in_timestamps)
+            end_time = max(in_timestamps)
+            duration_hours = (end_time - start_time).total_seconds() / 3600
+            throughput_per_hour = round(len(in_timestamps) / duration_hours, 2) if duration_hours > 0 else 0.0
 
-        # 6. Tracking Performance: parcels with all 3 required events
-        def has_required_events(events):
-            types = {e.get("type") for e in events}
-            return {"ItemInstruction", "ItemPropertiesUpdate", "VerifiedSortReport"}.issubset(types)
 
-        tracking_ok = sum(1 for p in parcels if has_required_events(p.get("events", [])))
+        # 6. Tracking Performance: parcels with all 3 required msg_ids
+        def has_required_msg_ids(events):
+            msg_ids = {e.get("msg_id") for e in events}
+            return {"2", "3", "6"}.issubset(msg_ids)  # Corresponding to ItemInstruction, ItemPropertiesUpdate, VerifiedSortReport
+
+        tracking_ok = sum(1 for p in parcels if has_required_msg_ids(p.get("events", [])))
         tracking_performance = round((tracking_ok / total) * 100, 2) if total else 0.0
 
         return {
             "date": payload.date,
             "total_parcels": total,
-            "sorted_good": sorted_good,
+            "sorted_parcels": sorted_parcels,
             "overflow": overflow,
             "barcode_read_ratio_percent": barcode_read_ratio,
             "volume_rate_percent": volume_rate,
