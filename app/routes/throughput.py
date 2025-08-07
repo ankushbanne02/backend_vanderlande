@@ -162,7 +162,7 @@ def get_throughput(payload: DateRequest, db: Database = Depends(get_db)):
                     raw = event.get("raw", "")
                     parts = raw.split("|")
                     if len(parts) > 10 and parts[10] == "999":
-                        for ev in event:
+                        for ev in events:
                             if ev.get("msg_id") == "2":
                                 overflow_count += 1
                                 break
