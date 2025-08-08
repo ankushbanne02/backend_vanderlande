@@ -3,6 +3,7 @@ from pymongo.database import Database
 from app.database.db import get_db
 from app.models.kpi_model import DateRequest
 from datetime import datetime
+from app.config import config
 
 router = APIRouter()
 
@@ -14,22 +15,71 @@ def get_summary(payload: DateRequest, db: Database = Depends(get_db)):
         if payload.date not in db.list_collection_names():
             raise HTTPException(status_code=404, detail=f"No collection found for date {payload.date}")
 
+        try:
+            start_time_obj = datetime.strptime(payload.start_time, "%H:%M")
+            end_time_obj = datetime.strptime(payload.end_time, "%H:%M")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Time format must be HH:MM")
+        
+        if end_time_obj <= start_time_obj:
+            raise HTTPException(status_code=400, detail="End time must be after start time")
+        
         collection = db[payload.date]
         parcels = list(collection.find({}))
 
         if not parcels:
             return {"message": "No data found for this date"}
 
-        total = len(parcels)
+        # Attach date to start and end for proper datetime comparison
+        start_dt = datetime.strptime(f"{payload.date} {payload.start_time}", "%Y-%m-%d %H:%M")
+        end_dt = datetime.strptime(f"{payload.date} {payload.end_time}", "%Y-%m-%d %H:%M")
 
-        # 1. Sorted Good
+        # Filter parcels using registeredTS directly
+        filtered_parcels = []
+        for p in parcels:
+            try:
+                ts = datetime.strptime(f"{payload.date} {p.get('registeredTS', '')}", "%Y-%m-%d %H:%M:%S,%f")
+                if start_dt <= ts <= end_dt:
+                    filtered_parcels.append(p)
+            except:
+                continue
+        
+        # 1. Total parcels
+        # Get unique host IDs from filtered parcels
+        unique_hosts = {p.get("hostId") for p in filtered_parcels if p.get("hostId")}
+        total_parcels = len(unique_hosts)
+
+        if total_parcels == 0:
+            return {
+                "message": "No parcels found in the given time range",
+                "start_time": payload.start_time,
+                "end_time": payload.end_time
+            }
+
+        # 2. Sorted Parcels
         sorted_parcels = sum(
             1 for p in parcels
             if p.get("status") == "sorted" and p.get("sort_strategy") == "1"
         )
 
+        # 3. Total parcels in the system
+        # Calculate parcels in the system
+        parcels_in_system = []
+        for p in filtered_parcels:
+            msg_ids = {event.get("msg_id") for event in p.get("events", [])}
+            if (
+                "2" in msg_ids
+                and not msg_ids.intersection({"6", "7"})
+                and ( "5" not in msg_ids or "5" in msg_ids )
+            ):
+                parcels_in_system.append(p)
+
+        total_in_system = len(parcels_in_system)
+
+        # 4. Overflow
+
         # Configurable locations for overflow detection
-        overflow_locations = ["1001.0045.0040.B31", "1001.0043.0000.B71"]
+        overflow_locations = config.get("overflow_locations", [])
 
         # Helper function to calculate overflow
         def calculate_overflow(parcels, overflow_locations):
@@ -65,22 +115,21 @@ def get_summary(payload: DateRequest, db: Database = Depends(get_db)):
 
             return overflow_count
 
-        # 2. Overflow
         overflow = calculate_overflow(parcels, overflow_locations)
 
-        # 3. Barcode Read Ratio
+        # 5. Barcode Read Ratio
         barcode_read = sum(1 for p in parcels if p.get("barcode_error") is False)
-        barcode_read_ratio = round((barcode_read / total) * 100, 2) if total else 0.0
+        barcode_read_ratio = round((barcode_read / total_parcels) * 100, 2) if total_parcels else 0.0
 
-        # 4. Volume Rate (only if real_volume is a valid positive number)
+        # 6. Volume Rate (only if real_volume is a valid positive number)
         volume_valid = sum(
             1 for p in parcels
             if isinstance(p.get("volume_data", {}).get("real_volume"), (int, float))
             and p["volume_data"]["real_volume"] > 0
         )
-        volume_rate = round((volume_valid / total) * 100, 2) if total else 0.0
+        volume_rate = round((volume_valid / total_parcels) * 100, 2) if total_parcels else 0.0
 
-        # 5. Throughput (average parcels per hour using msg_id == "2")
+        # 7. Throughput (average parcels per hour using msg_id == "2")
         in_timestamps = []
 
         for p in parcels:
@@ -88,7 +137,7 @@ def get_summary(payload: DateRequest, db: Database = Depends(get_db)):
                 if event.get("msg_id") == "2":
                     ts_str = event.get("ts")
                     try:
-                        ts = datetime.strptime(ts_str, "%H:%M:%S,%f")
+                        ts = datetime.strptime(f"{payload.date} {ts_str}", "%Y-%m-%d %H:%M:%S,%f")
                         in_timestamps.append(ts)
                         break  # only first msg_id == 2 per parcel
                     except:
@@ -102,17 +151,18 @@ def get_summary(payload: DateRequest, db: Database = Depends(get_db)):
             throughput_per_hour = round(len(in_timestamps) / duration_hours, 2) if duration_hours > 0 else 0.0
 
 
-        # 6. Tracking Performance: parcels with all 3 required msg_ids
+        # 8. Tracking Performance: parcels with all 3 required msg_ids
         def has_required_msg_ids(events):
             msg_ids = {e.get("msg_id") for e in events}
             return {"2", "3", "6"}.issubset(msg_ids)  # Corresponding to ItemInstruction, ItemPropertiesUpdate, VerifiedSortReport
 
         tracking_ok = sum(1 for p in parcels if has_required_msg_ids(p.get("events", [])))
-        tracking_performance = round((tracking_ok / total) * 100, 2) if total else 0.0
+        tracking_performance = round((tracking_ok / total_parcels) * 100, 2) if total_parcels else 0.0
 
         return {
             "date": payload.date,
-            "total_parcels": total,
+            "total_parcels": total_parcels,
+            "total_in_system": total_in_system,
             "sorted_parcels": sorted_parcels,
             "overflow": overflow,
             "barcode_read_ratio_percent": barcode_read_ratio,
