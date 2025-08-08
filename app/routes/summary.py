@@ -16,8 +16,9 @@ def get_summary(payload: DateRequest, db: Database = Depends(get_db)):
             raise HTTPException(status_code=404, detail=f"No collection found for date {payload.date}")
 
         try:
-            start_time_obj = datetime.strptime(payload.start_time, "%H:%M")
-            end_time_obj = datetime.strptime(payload.end_time, "%H:%M")
+            # Convert API start and end into time objects (HH:MM)
+            start_time_obj = datetime.strptime(payload.start_time, "%H:%M").time()
+            end_time_obj = datetime.strptime(payload.end_time, "%H:%M").time()
         except ValueError:
             raise HTTPException(status_code=400, detail="Time format must be HH:MM")
         
@@ -37,11 +38,17 @@ def get_summary(payload: DateRequest, db: Database = Depends(get_db)):
         # Filter parcels using registeredTS directly
         filtered_parcels = []
         for p in parcels:
+            ts_str = p.get("registeredTS")
+            if not ts_str:
+                continue
             try:
-                ts = datetime.strptime(f"{payload.date} {p.get('registeredTS', '')}", "%Y-%m-%d %H:%M:%S,%f")
-                if start_dt <= ts <= end_dt:
+                # Parse DB time string "HH:MM:SS,ms" → time object
+                parcel_time_obj = datetime.strptime(ts_str, "%H:%M:%S,%f").time()
+
+                # Compare only on HH:MM level
+                if start_time_obj <= parcel_time_obj <= end_time_obj:
                     filtered_parcels.append(p)
-            except:
+            except ValueError:
                 continue
         
         # 1. Total parcels
