@@ -46,7 +46,7 @@ def get_summary(payload: DateRequest, db: Database = Depends(get_db)):
             ts_str = p.get("registerTS")
             if not ts_str:
                 continue
-            ts = safe_parse_time(ts_str)
+            ts = safe_parse_time(ts_str, start_time)
             if ts and start_time <= ts <= end_time:
                 filtered_parcels.append(p)
         
