@@ -15,13 +15,13 @@ def get_summary(payload: DateRequest, db: Database = Depends(get_db)):
         if payload.date not in db.list_collection_names():
             raise HTTPException(status_code=404, detail=f"No collection found for date {payload.date}")
 
+        # Convert API start/end into time objects (HH:MM)
         try:
-            # Convert API start and end into time objects (HH:MM)
             start_time_obj = datetime.strptime(payload.start_time, "%H:%M").time()
             end_time_obj = datetime.strptime(payload.end_time, "%H:%M").time()
         except ValueError:
             raise HTTPException(status_code=400, detail="Time format must be HH:MM")
-        
+
         if end_time_obj <= start_time_obj:
             raise HTTPException(status_code=400, detail="End time must be after start time")
         
@@ -31,25 +31,24 @@ def get_summary(payload: DateRequest, db: Database = Depends(get_db)):
         if not parcels:
             return {"message": "No data found for this date"}
 
-        # Attach date to start and end for proper datetime comparison
-        start_dt = datetime.strptime(f"{payload.date} {payload.start_time}", "%Y-%m-%d %H:%M")
-        end_dt = datetime.strptime(f"{payload.date} {payload.end_time}", "%Y-%m-%d %H:%M")
-
-        # Filter parcels using registeredTS directly
+        # --- Filter parcels by HH:MM ---
         filtered_parcels = []
         for p in parcels:
-            ts_str = p.get("registeredTS")
+            ts_str = p.get("registeredTS")  # e.g. "07:45:12,123"
             if not ts_str:
                 continue
             try:
-                # Parse DB time string "HH:MM:SS,ms" → time object
-                parcel_time_obj = datetime.strptime(ts_str, "%H:%M:%S,%f").time()
-
-                # Compare only on HH:MM level
-                if start_time_obj <= parcel_time_obj <= end_time_obj:
-                    filtered_parcels.append(p)
+                # Convert DB format to time object (HH:MM:SS,ms → time)
+                parcel_time_obj = datetime.strptime(ts_str.strip(), "%H:%M:%S,%f").time()
             except ValueError:
-                continue
+                # If DB has no milliseconds
+                try:
+                    parcel_time_obj = datetime.strptime(ts_str.strip(), "%H:%M:%S").time()
+                except ValueError:
+                    continue
+
+            if start_time_obj <= parcel_time_obj <= end_time_obj:
+                filtered_parcels.append(p)
         
         # 1. Total parcels
         # Get unique host IDs from filtered parcels
@@ -136,27 +135,24 @@ def get_summary(payload: DateRequest, db: Database = Depends(get_db)):
         )
         volume_rate = round((volume_valid / total_parcels) * 100, 2) if total_parcels else 0.0
 
-        # 7. Throughput (average parcels per hour using msg_id == "2")
+        # 7. Throughput (average parcels/hour with msg_id == "2")
         in_timestamps = []
-
-        for p in parcels:
+        for p in filtered_parcels:
             for event in p.get("events", []):
                 if event.get("msg_id") == "2":
                     ts_str = event.get("ts")
                     try:
-                        ts = datetime.strptime(f"{payload.date} {ts_str}", "%Y-%m-%d %H:%M:%S,%f")
+                        ts = datetime.strptime(ts_str.strip(), "%H:%M:%S,%f")
                         in_timestamps.append(ts)
-                        break  # only first msg_id == 2 per parcel
+                        break
                     except:
                         continue
-
         throughput_per_hour = 0.0
         if in_timestamps:
             start_time = min(in_timestamps)
             end_time = max(in_timestamps)
             duration_hours = (end_time - start_time).total_seconds() / 3600
             throughput_per_hour = round(len(in_timestamps) / duration_hours, 2) if duration_hours > 0 else 0.0
-
 
         # 8. Tracking Performance: parcels with all 3 required msg_ids
         def has_required_msg_ids(events):
