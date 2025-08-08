@@ -13,54 +13,37 @@ def get_summary(payload: DateRequest, db: Database = Depends(get_db)):
         if payload.date not in db.list_collection_names():
             raise HTTPException(status_code=404, detail=f"No collection found for date {payload.date}")
 
-        # --- Build start/end as full datetime ---
-        try:
-            date_obj = datetime.strptime(payload.date, "%Y-%m-%d")
-            start_time = datetime.strptime(payload.start_time, "%H:%M").replace(
-                year=date_obj.year, month=date_obj.month, day=date_obj.day
-            )
-            end_time = datetime.strptime(payload.end_time, "%H:%M").replace(
-                year=date_obj.year, month=date_obj.month, day=date_obj.day
-            )
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid date or time format")
-
-        if end_time <= start_time:
-            raise HTTPException(status_code=400, detail="End time must be after start time")
-        
         collection = db[payload.date]
         parcels = list(collection.find({}))
-
         if not parcels:
             return {"message": "No data found for this date"}
 
+        # Parse start and end times
+        try:
+            start_time = datetime.strptime(payload.start_time, "%H:%M")
+            end_time = datetime.strptime(payload.end_time, "%H:%M")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Time format must be HH:MM")
+        if end_time <= start_time:
+            raise HTTPException(status_code=400, detail="End time must be after start time")
+
         # --- Helper to parse DB times like throughput ---
-        def safe_parse_time(ts_str):
-            formats = [
-                "%Y-%m-%d %H:%M:%S,%f",  # Full datetime with ms
-                "%Y-%m-%d %H:%M:%S",     # Full datetime no ms
-                "%H:%M:%S,%f",           # Time only with ms
-                "%H:%M:%S"               # Time only no ms
-            ]
-            for fmt in formats:
-                try:
-                    ts = datetime.strptime(ts_str.strip(), fmt)
-                    # If only time was provided, add the date from start_time
-                    if fmt in ("%H:%M:%S,%f", "%H:%M:%S"):
-                        ts = ts.replace(
-                            year=start_time.year,
-                            month=start_time.month,
-                            day=start_time.day
+        def safe_parse_time(ts_str, start_time):
+                formats = ["%H:%M:%S,%f", "%H:%M:%S"]  # support both with and without milliseconds
+                for fmt in formats:
+                    try:
+                        ts = datetime.strptime(ts_str.strip(), fmt).replace(
+                            year=start_time.year, month=start_time.month, day=start_time.day
                         )
-                    return ts
-                except ValueError:
-                    continue
-            return None
+                        return ts
+                    except ValueError:
+                        continue
+                return None
 
         # --- Filter parcels by time range ---
         filtered_parcels = []
         for p in parcels:
-            ts_str = p.get("registeredTS")
+            ts_str = p.get("registerTS")
             if not ts_str:
                 continue
             ts = safe_parse_time(ts_str)
