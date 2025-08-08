@@ -36,12 +36,22 @@ def get_summary(payload: DateRequest, db: Database = Depends(get_db)):
 
         # --- Helper to parse DB times like throughput ---
         def safe_parse_time(ts_str):
-            formats = ["%H:%M:%S,%f", "%H:%M:%S"]
+            formats = [
+                "%Y-%m-%d %H:%M:%S,%f",  # Full datetime with ms
+                "%Y-%m-%d %H:%M:%S",     # Full datetime no ms
+                "%H:%M:%S,%f",           # Time only with ms
+                "%H:%M:%S"               # Time only no ms
+            ]
             for fmt in formats:
                 try:
-                    ts = datetime.strptime(ts_str.strip(), fmt).replace(
-                        year=start_time.year, month=start_time.month, day=start_time.day
-                    )
+                    ts = datetime.strptime(ts_str.strip(), fmt)
+                    # If only time was provided, add the date from start_time
+                    if fmt in ("%H:%M:%S,%f", "%H:%M:%S"):
+                        ts = ts.replace(
+                            year=start_time.year,
+                            month=start_time.month,
+                            day=start_time.day
+                        )
                     return ts
                 except ValueError:
                     continue
