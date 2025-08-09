@@ -98,7 +98,8 @@ def get_throughput(payload: DateRequest, db: Database = Depends(get_db)):
                     if start_time <= ts <= end_time:
                         sort_code = event.get("sort_code")
                         sort_status = event.get("raw", "")
-                        raw_parts = raw.split("|")
+                        raw_parts = sort_status.split("|")  # ✅ fixed
+
                         if len(raw_parts) > 10:
                             sort_status = raw_parts[10]
                             # Compute floored bin label
@@ -124,6 +125,7 @@ def get_throughput(payload: DateRequest, db: Database = Depends(get_db)):
                                                 parcels_out_time[bin_label] += 1
                                             break
                                 break
+
 
             def safe_parse_time(ts_str, start_time):
                 formats = ["%H:%M:%S,%f", "%H:%M:%S"]  # support both with and without milliseconds
