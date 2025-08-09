@@ -122,7 +122,7 @@ def get_summary(payload: DateRequest, db: Database = Depends(get_db)):
         for p in filtered_parcels:
             for event in p.get("events", []):
                 if event.get("msg_id") == "2":
-                    ts = safe_parse_time(event.get("ts", ""))
+                    ts = safe_parse_time(event.get("ts", ""), start_time)
                     if ts:
                         in_timestamps.append(ts)
                         break
