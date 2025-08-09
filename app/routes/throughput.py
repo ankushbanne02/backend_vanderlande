@@ -4,6 +4,7 @@ from app.database.db import get_db
 from app.models.kpi_model import DateRequest
 from datetime import datetime, timedelta
 from collections import defaultdict, OrderedDict
+from app.config import config
 
 router = APIRouter()
 
@@ -39,7 +40,7 @@ def get_throughput(payload: DateRequest, db: Database = Depends(get_db)):
             raise HTTPException(status_code=400, detail="End time must be after start time")
 
         # Configurable locations for overflow detection
-        overflow_locations = ["1001.0045.0040.B31", "1001.0043.0000.B71"]
+        overflow_locations = config.get("overflow_locations", [])
 
         time_bins = OrderedDict()
         current_time = start_time
@@ -95,7 +96,8 @@ def get_throughput(payload: DateRequest, db: Database = Depends(get_db)):
                         continue
 
                     if start_time <= ts <= end_time:
-                        raw = event.get("raw", "")
+                        sort_code = event.get("sort_code")
+                        sort_status = event.get("raw", "")
                         raw_parts = raw.split("|")
                         if len(raw_parts) > 10:
                             sort_status = raw_parts[10]
@@ -105,7 +107,7 @@ def get_throughput(payload: DateRequest, db: Database = Depends(get_db)):
                             bin_time = start_time + timedelta(minutes=floored_minutes)
                             bin_label = bin_time.strftime("%H:%M")
 
-                            if sort_status == "1":
+                            if sort_code == "1":
                                 total_out += 1
                                 if bin_label in parcels_out_time:
                                     parcels_out_time[bin_label] += 1
